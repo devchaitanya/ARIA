@@ -1,0 +1,9 @@
+.env
+text
+__pycache__/
+*.pyc
+.chromadb/
+repos/
+*.egg-info/
+dist/
+build/
