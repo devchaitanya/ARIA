@@ -52,8 +52,11 @@ class DebateManager:
 
             additional = []
             for v in votes:
-                if v.get("additional_evidence"):
-                    additional.append(v["additional_evidence"])
+                ev = v.get("additional_evidence", "")
+                if ev:
+                    if isinstance(ev, list):
+                        ev = " ".join(str(x) for x in ev)
+                    additional.append(str(ev))
             if additional:
                 finding.description += "\n\nAdditional evidence from cross-verification:\n" + "\n".join(additional)
 

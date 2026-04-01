@@ -76,12 +76,13 @@ def node_review(state: ReviewState) -> ReviewState:
             logger.error(f"  {agent.name} failed: {e}")
             return agent.name, []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(run_agent, agent): agent for agent in agents}
-        for future in concurrent.futures.as_completed(futures):
-            name, findings = future.result()
-            state.agent_findings[name] = findings
-            all_findings.extend(findings)
+    # Run agents sequentially with delay to respect rate limits across providers
+    import time
+    for agent in agents:
+        name, findings = run_agent(agent)
+        state.agent_findings[name] = findings
+        all_findings.extend(findings)
+        time.sleep(2)  # Rate-limit spacing between agents
 
     state.all_findings = all_findings
     logger.info(f"[REVIEW] Total findings across all agents: {len(all_findings)}")

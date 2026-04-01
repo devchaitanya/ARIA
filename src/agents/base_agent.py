@@ -143,14 +143,29 @@ class BaseAgent(ABC):
         except (json.JSONDecodeError, KeyError, TypeError):
             return []
 
+    # Provider fallback order: try primary, then alternatives
+    _PROVIDER_FALLBACK = {
+        "groq": ["mistral", "gemini"],
+        "gemini": ["mistral", "groq"],
+        "mistral": ["groq", "gemini"],
+    }
+
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
-        if self.provider == "groq":
-            return self._call_groq(system_prompt, user_prompt)
-        elif self.provider == "gemini":
-            return self._call_gemini(system_prompt, user_prompt)
-        elif self.provider == "mistral":
-            return self._call_mistral(system_prompt, user_prompt)
-        raise ValueError(f"Unknown provider: {self.provider}")
+        providers_to_try = [self.provider] + self._PROVIDER_FALLBACK.get(self.provider, [])
+        last_error = None
+        for provider in providers_to_try:
+            try:
+                if provider == "groq" and GROQ_API_KEY:
+                    return self._call_groq(system_prompt, user_prompt)
+                elif provider == "gemini" and GEMINI_API_KEY:
+                    return self._call_gemini(system_prompt, user_prompt)
+                elif provider == "mistral" and MISTRAL_API_KEY:
+                    return self._call_mistral(system_prompt, user_prompt)
+            except Exception as e:
+                last_error = e
+                logger.warning(f"  {self.name}: {provider} failed ({e.__class__.__name__}), trying fallback...")
+                continue
+        raise last_error or ValueError(f"No available provider for {self.name}")
 
     def _call_groq(self, system_prompt: str, user_prompt: str) -> str:
         def _do():
