@@ -3,7 +3,9 @@ import os
 import time
 import json
 import logging
+import tempfile
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -305,6 +307,10 @@ def render_report(state):
     with c4:
         render_metric_card("Files", str(files_count), "analyzed")
 
+    # ── Knowledge Graph Visualization ─────────────────────────────────
+    if state.knowledge_graph is not None:
+        render_knowledge_graph(state.knowledge_graph)
+
     # ── Severity summary + Agent contributions ──────────────────────────
     st.markdown('<div class="section-hdr">📊 Breakdown</div>', unsafe_allow_html=True)
 
@@ -360,6 +366,133 @@ def render_report(state):
             "application/json",
             use_container_width=True,
         )
+
+
+def render_knowledge_graph(G):
+    """Render an interactive knowledge graph using pyvis."""
+    try:
+        from pyvis.network import Network
+    except ImportError:
+        st.warning("Install `pyvis` to see the interactive graph: `pip install pyvis`")
+        return
+
+    st.markdown('<div class="section-hdr">🔗 Knowledge Graph</div>', unsafe_allow_html=True)
+
+    # ── Controls ────────────────────────────────────────────────────────
+    node_count = G.number_of_nodes()
+    max_nodes = min(node_count, 300)
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        show_limit = st.slider(
+            "Max nodes to display", 20, max_nodes, min(100, max_nodes),
+            help="Large graphs are capped for performance",
+        )
+    with col2:
+        edge_filter = st.multiselect(
+            "Edge types",
+            ["defines", "imports", "calls"],
+            default=["defines", "imports", "calls"],
+        )
+
+    # ── Build subgraph with limit ───────────────────────────────────────
+    # Prioritize high-degree nodes for a meaningful view
+    ranked = sorted(G.nodes(), key=lambda n: G.degree(n), reverse=True)[:show_limit]
+    sub_nodes = set(ranked)
+
+    # ── Color palette ───────────────────────────────────────────────────
+    NODE_COLORS = {
+        "file": "#6366f1",       # indigo
+        "function": "#22d3ee",   # cyan
+        "class": "#f59e0b",      # amber
+        "struct": "#f59e0b",
+    }
+    EDGE_COLORS = {
+        "defines": "#4b5563",
+        "imports": "#3b82f6",
+        "calls": "#ef4444",
+    }
+
+    # ── Build pyvis network ─────────────────────────────────────────────
+    net = Network(
+        height="520px",
+        width="100%",
+        bgcolor="#0f172a",
+        font_color="#e2e8f0",
+        directed=True,
+    )
+    net.barnes_hut(
+        gravity=-3000,
+        central_gravity=0.3,
+        spring_length=120,
+        spring_strength=0.04,
+        damping=0.09,
+    )
+
+    for node in sub_nodes:
+        data = G.nodes[node]
+        ntype = data.get("type", "file")
+        color = NODE_COLORS.get(ntype, "#9ca3af")
+
+        # Shorten label for readability
+        if "::" in node:
+            label = node.split("::")[-1]
+        else:
+            label = node.split("/")[-1] if "/" in node else node
+
+        size = 10 + min(G.degree(node) * 2, 30)
+        shape = "dot" if ntype == "file" else ("diamond" if ntype in ("class", "struct") else "triangle")
+
+        net.add_node(
+            node,
+            label=label,
+            title=f"{node}\nType: {ntype}\nConnections: {G.degree(node)}",
+            color=color,
+            size=size,
+            shape=shape,
+        )
+
+    for u, v, data in G.edges(data=True):
+        if u in sub_nodes and v in sub_nodes:
+            rel = data.get("relation", "unknown")
+            if rel not in edge_filter:
+                continue
+            net.add_edge(
+                u, v,
+                title=rel,
+                color=EDGE_COLORS.get(rel, "#6b7280"),
+                width=1.5 if rel == "calls" else 1,
+                arrows="to",
+            )
+
+    # ── Render to HTML and embed ────────────────────────────────────────
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w")
+    net.save_graph(tmp.name)
+    tmp.close()
+
+    with open(tmp.name, "r") as f:
+        html = f.read()
+    os.unlink(tmp.name)
+
+    # Legend row
+    st.markdown(
+        '<div style="display:flex;gap:1.2rem;margin-bottom:0.6rem;font-size:0.8rem;color:#9ca3af;">'
+        '<span>● <span style="color:#6366f1">File</span></span>'
+        '<span>▲ <span style="color:#22d3ee">Function</span></span>'
+        '<span>◆ <span style="color:#f59e0b">Class</span></span>'
+        '<span>— <span style="color:#3b82f6">imports</span></span>'
+        '<span>— <span style="color:#ef4444">calls</span></span>'
+        '<span>— <span style="color:#4b5563">defines</span></span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    components.html(html, height=540, scrolling=False)
+
+    st.caption(
+        f"Showing {min(show_limit, node_count)} of {node_count} nodes · "
+        f"{G.number_of_edges()} edges · Interactive — drag, zoom, hover for details"
+    )
 
 
 def render_finding(f):

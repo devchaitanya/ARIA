@@ -51,6 +51,7 @@ def node_ingest(state: ReviewState, on_progress=None) -> ReviewState:
         kg = build_knowledge_graph(files)
         state.graph_summary = get_graph_summary(kg)
         state.graph_stats = kg["stats"]
+        state.knowledge_graph = kg["graph"]
 
         build_context_chunks(files)
 

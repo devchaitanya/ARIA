@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Any
 from src.agents.base_agent import Finding
 
 
@@ -12,6 +13,7 @@ class ReviewState:
     files: list = field(default_factory=list)
     graph_summary: str = ""
     graph_stats: dict = field(default_factory=dict)
+    knowledge_graph: Any = None  # NetworkX DiGraph for visualization
     agent_findings: dict = field(default_factory=dict)  # agent_name -> list[Finding]
     all_findings: list = field(default_factory=list)
     verified_findings: list = field(default_factory=list)
