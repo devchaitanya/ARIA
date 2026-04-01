@@ -5,7 +5,6 @@ import json
 import logging
 import tempfile
 import streamlit as st
-import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -23,68 +22,86 @@ CATEGORY_ICONS = {
 }
 
 AGENT_OPTIONS = {
-    "security":     {"label": "🛡️ Security",      "desc": "OWASP Top 10, injection, secrets, auth"},
-    "quality":      {"label": "🔧 Code Quality",   "desc": "Complexity, dead code, error handling"},
-    "architecture": {"label": "🏗️ Architecture",   "desc": "SOLID, coupling, layering, dependencies"},
-    "performance":  {"label": "⚡ Performance",     "desc": "Algorithms, N+1 queries, memory, caching"},
-    "ai_slop":      {"label": "🧹 AI-Slop",        "desc": "Over-abstraction, cargo-cult patterns"},
+    "security":     {"label": "Security",       "icon": "🛡️", "desc": "OWASP Top 10, injection, secrets, auth",    "color": "#ef4444"},
+    "quality":      {"label": "Code Quality",   "icon": "🔧", "desc": "Complexity, dead code, error handling",     "color": "#3b82f6"},
+    "architecture": {"label": "Architecture",   "icon": "🏗️", "desc": "SOLID, coupling, layering, dependencies",  "color": "#f59e0b"},
+    "performance":  {"label": "Performance",    "icon": "⚡", "desc": "Algorithms, N+1, memory, caching",         "color": "#22c55e"},
+    "ai_slop":      {"label": "AI-Slop Detect", "icon": "🧹", "desc": "Over-abstraction, cargo-cult patterns",    "color": "#a855f7"},
 }
 
-# ── Compact CSS ─────────────────────────────────────────────────────────
+# ── CSS ─────────────────────────────────────────────────────────────────
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 .stApp { font-family: 'Inter', sans-serif; }
 
-/* Compact hero */
-.hero { text-align:center; padding:1.5rem 0 1rem; }
-.hero h1 { font-size:1.8rem; font-weight:700; margin:0; letter-spacing:-0.5px; }
-.hero p { font-size:0.88rem; opacity:0.6; margin:0.2rem 0 0; }
+/* ─ Hero ─ */
+.hero { text-align:center; padding:2rem 0 1rem; }
+.hero h1 {
+    font-size:2.4rem; font-weight:800; margin:0; letter-spacing:-1px;
+    background:linear-gradient(135deg,#6366f1,#a855f7,#ec4899);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+}
+.hero .sub { font-size:0.9rem; color:#8b949e; margin:0.35rem 0 0; }
+.hero .badge {
+    display:inline-block; margin-top:0.6rem; padding:0.25rem 0.85rem;
+    background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.22);
+    border-radius:20px; font-size:0.72rem; color:#818cf8; font-weight:500;
+}
 
-/* Live log */
+/* ─ Live log ─ */
 .live-log {
-    background:#111827; border:1px solid #1f2937; border-radius:10px;
+    background:#0d1117; border:1px solid #21262d; border-radius:10px;
     padding:0.8rem 1rem; max-height:320px; overflow-y:auto;
     font-family:'JetBrains Mono','Fira Code',monospace; font-size:0.78rem;
 }
-.log-row { display:flex; gap:0.5rem; padding:0.2rem 0; border-bottom:1px solid #1a1a2e; animation:fadeIn .25s; }
+.log-row { display:flex; gap:0.6rem; padding:0.22rem 0; border-bottom:1px solid #161b22; animation:fadeIn .25s; }
 .log-row:last-child { border-bottom:none; }
-.log-t { color:#6b7280; min-width:42px; flex-shrink:0; font-size:0.7rem; padding-top:1px; }
-.log-m { color:#d1d5db; line-height:1.4; }
-.log-m.ok { color:#34d399; }
-.log-m.run { color:#60a5fa; }
-.log-m.err { color:#f87171; }
+.log-t { color:#484f58; min-width:42px; flex-shrink:0; font-size:0.7rem; padding-top:1px; }
+.log-m { color:#c9d1d9; line-height:1.4; }
+.log-m.ok  { color:#3fb950; }
+.log-m.run { color:#58a6ff; }
+.log-m.err { color:#f85149; }
 @keyframes fadeIn { from{opacity:0;transform:translateY(3px)} to{opacity:1;transform:translateY(0)} }
-
-/* Scrollbar */
 .live-log::-webkit-scrollbar { width:5px; }
-.live-log::-webkit-scrollbar-track { background:#111827; }
-.live-log::-webkit-scrollbar-thumb { background:#374151; border-radius:3px; }
+.live-log::-webkit-scrollbar-track { background:#0d1117; }
+.live-log::-webkit-scrollbar-thumb { background:#30363d; border-radius:3px; }
 
-/* Metric row */
-.m-row { display:flex; gap:0.8rem; justify-content:center; flex-wrap:wrap; margin:1rem 0; }
+/* ─ Metric cards ─ */
+.m-row { display:flex; gap:0.7rem; justify-content:center; flex-wrap:wrap; margin:1rem 0; }
 .m-card {
-    background:linear-gradient(135deg,#1e1e2e,#2a2a40); border:1px solid #3a3a5c;
-    border-radius:12px; padding:0.9rem 1.1rem; text-align:center; min-width:120px; flex:1;
+    background:linear-gradient(145deg,#161b22,#1c2333); border:1px solid #30363d;
+    border-radius:14px; padding:1rem 1.2rem; text-align:center; min-width:110px; flex:1;
+    transition:border-color 0.2s;
 }
-.m-card .m-label { font-size:0.68rem; font-weight:600; text-transform:uppercase; letter-spacing:0.7px; color:#9ca3af; }
-.m-card .m-val { font-size:1.6rem; font-weight:700; color:#f9fafb; margin:0.15rem 0; }
-.m-card .m-sub { font-size:0.72rem; color:#6b7280; }
+.m-card:hover { border-color:#58a6ff; }
+.m-card .m-label { font-size:0.65rem; font-weight:600; text-transform:uppercase; letter-spacing:0.8px; color:#8b949e; }
+.m-card .m-val   { font-size:1.6rem; font-weight:700; color:#f0f6fc; margin:0.15rem 0; }
+.m-card .m-sub   { font-size:0.7rem; color:#484f58; }
 
-/* Severity pills */
-.sev-pill { display:inline-block; padding:0.1rem 0.55rem; border-radius:16px; font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.4px; }
-.sev-critical { background:#450a0a; color:#fca5a5; border:1px solid #7f1d1d; }
-.sev-high     { background:#431407; color:#fdba74; border:1px solid #7c2d12; }
-.sev-medium   { background:#422006; color:#fcd34d; border:1px solid #78350f; }
-.sev-low      { background:#052e16; color:#86efac; border:1px solid #14532d; }
+/* ─ Severity pills ─ */
+.sev-pill { display:inline-block; padding:0.15rem 0.6rem; border-radius:20px; font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; }
+.sev-critical { background:#490202; color:#ff7b72; border:1px solid #6e1010; }
+.sev-high     { background:#3d1300; color:#ffa657; border:1px solid #6e3a0a; }
+.sev-medium   { background:#3b2300; color:#e3b341; border:1px solid #6e5400; }
+.sev-low      { background:#04260d; color:#56d364; border:1px solid #0e4a1e; }
 
-/* Agent tag */
-.a-tag { display:inline-block; background:#1e293b; border:1px solid #334155; border-radius:6px; padding:0.15rem 0.5rem; font-size:0.7rem; color:#94a3b8; margin-right:0.3rem; }
+/* ─ Agent tag ─ */
+.a-tag { display:inline-block; background:#161b22; border:1px solid #30363d; border-radius:6px; padding:0.18rem 0.55rem; font-size:0.7rem; color:#8b949e; margin-right:0.3rem; }
 
-/* Section */
-.sec { font-size:1.1rem; font-weight:700; color:#e5e7eb; border-bottom:2px solid #302b63; padding-bottom:0.3rem; margin:1.2rem 0 0.8rem; }
+/* ─ Section headings ─ */
+.sec {
+    font-size:1.12rem; font-weight:700; color:#f0f6fc; margin:1.6rem 0 0.7rem;
+    padding-bottom:0.4rem; border-bottom:2px solid rgba(99,102,241,0.3);
+}
 
-/* Hide default metrics */
+/* ─ Agent card header ─ */
+.ag-hdr { text-align:center; padding:0.3rem 0 0.15rem; }
+.ag-hdr .ag-icon { font-size:1.8rem; line-height:1; }
+.ag-hdr .ag-bar  { width:36px; height:3px; border-radius:2px; margin:0.45rem auto 0.1rem; }
+.ag-hdr .ag-desc { font-size:0.7rem; color:#8b949e; line-height:1.35; margin-top:0.25rem; }
+
+/* ─ Hide default metrics ─ */
 div[data-testid="stMetric"] { display:none; }
 </style>
 """
@@ -92,7 +109,19 @@ div[data-testid="stMetric"] { display:none; }
 
 def main():
     st.markdown(CSS, unsafe_allow_html=True)
-    st.markdown('<div class="hero"><h1>🤖 ARIA</h1><p>Multi-LLM Code Review · Model Debate Protocol</p></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="hero">'
+        '<h1>🤖 ARIA</h1>'
+        '<p class="sub">Adaptive Review Intelligence Architecture</p>'
+        '<span class="badge">Multi-LLM Debate Protocol · 5 Specialist Agents</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Session state ───────────────────────────────────────────────────
+    for key in ("ingest_state", "review_state"):
+        if key not in st.session_state:
+            st.session_state[key] = None
 
     # ── Input row ───────────────────────────────────────────────────────
     c1, c2 = st.columns([4, 1])
@@ -101,16 +130,69 @@ def main():
     with c2:
         branch = st.text_input("Branch", value="main", label_visibility="collapsed")
 
-    # ── Phase 1: Ingest ─────────────────────────────────────────────────
+    # ── Phase 1 button ──────────────────────────────────────────────────
     if st.button("🔍  Analyze Repository", use_container_width=True, type="primary"):
-        if not repo_url or "github.com" not in repo_url:
-            st.error("Enter a valid GitHub repo URL.")
-            return
+        st.session_state.review_state = None
+        st.session_state.ingest_state = None
         _phase_ingest(repo_url, branch)
 
+    # ── Render persisted ingest results ─────────────────────────────────
+    state = st.session_state.ingest_state
+    if state is not None and state.status != "failed":
+        gs = state.graph_stats
+        st.markdown(
+            f'<div class="m-row">'
+            f'<div class="m-card"><div class="m-label">Files</div><div class="m-val">{gs.get("total_files",0)}</div></div>'
+            f'<div class="m-card"><div class="m-label">Functions</div><div class="m-val">{gs.get("functions",0)}</div></div>'
+            f'<div class="m-card"><div class="m-label">Classes</div><div class="m-val">{gs.get("classes",0)}</div></div>'
+            f'<div class="m-card"><div class="m-label">Graph Edges</div><div class="m-val">{gs.get("total_edges",0)}</div></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        if state.knowledge_graph is not None:
+            _render_graph(state.knowledge_graph)
+
+        # ── Agent selection cards (3 + 2 grid) ─────────────────────────
+        st.markdown('<div class="sec">🤖 Select Review Agents</div>', unsafe_allow_html=True)
+
+        selected = []
+        keys = list(AGENT_OPTIONS.keys())
+
+        for row_keys in [keys[:3], keys[3:]]:
+            cols = st.columns(3)
+            for i, key in enumerate(row_keys):
+                info = AGENT_OPTIONS[key]
+                with cols[i]:
+                    with st.container(border=True):
+                        st.markdown(
+                            f'<div class="ag-hdr">'
+                            f'<div class="ag-icon">{info["icon"]}</div>'
+                            f'<div class="ag-bar" style="background:{info["color"]};"></div>'
+                            f'<div class="ag-desc">{info["desc"]}</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                        if st.checkbox(info["label"], value=True, key=f"agent_{key}"):
+                            selected.append(key)
+
+        if selected:
+            if st.button(
+                f"🚀  Run {len(selected)} Agent{'s' if len(selected) > 1 else ''}",
+                use_container_width=True, type="primary",
+            ):
+                _phase_analyze(state, selected)
+        else:
+            st.warning("Select at least one agent.")
+
+    # ── Render persisted review results ─────────────────────────────────
+    if st.session_state.review_state is not None:
+        _render_report(st.session_state.review_state)
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────
 
 def _make_logger():
-    """Create a reusable progress logger (timeline + progress bar)."""
     bar = st.progress(0, text="Starting…")
     placeholder = st.empty()
     entries: list[dict] = []
@@ -139,9 +221,12 @@ def _make_logger():
 
 
 def _phase_ingest(repo_url: str, branch: str):
-    """Phase 1: clone, parse, build graph — then show graph + agent picker."""
-    log, bar, t0 = _make_logger()
+    """Phase 1 — clone, parse, build knowledge graph. Saves to session state."""
+    if not repo_url or "github.com" not in repo_url:
+        st.error("Please enter a valid GitHub repository URL.")
+        return
 
+    log, bar, t0 = _make_logger()
     try:
         state = run_ingest(repo_url, branch, on_progress=log)
     except Exception as e:
@@ -156,44 +241,11 @@ def _phase_ingest(repo_url: str, branch: str):
     log("ingested", f"✅ Repository indexed in {elapsed:.1f}s — {len(state.files)} files, "
         f"{state.graph_stats.get('total_nodes', 0)} nodes", 0.18)
 
-    # ── Show graph stats ────────────────────────────────────────────────
-    gs = state.graph_stats
-    st.markdown(
-        f'<div class="m-row">'
-        f'<div class="m-card"><div class="m-label">Files</div><div class="m-val">{gs.get("total_files",0)}</div></div>'
-        f'<div class="m-card"><div class="m-label">Functions</div><div class="m-val">{gs.get("functions",0)}</div></div>'
-        f'<div class="m-card"><div class="m-label">Classes</div><div class="m-val">{gs.get("classes",0)}</div></div>'
-        f'<div class="m-card"><div class="m-label">Edges</div><div class="m-val">{gs.get("total_edges",0)}</div></div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ── Show knowledge graph ────────────────────────────────────────────
-    if state.knowledge_graph is not None:
-        _render_graph(state.knowledge_graph)
-
-    # ── Agent selection ─────────────────────────────────────────────────
-    st.markdown('<div class="sec">🤖 Select Review Agents</div>', unsafe_allow_html=True)
-    st.caption("Choose which analysis to run. More agents = deeper review but longer wait.")
-
-    selected = []
-    cols = st.columns(len(AGENT_OPTIONS))
-    for col, (key, info) in zip(cols, AGENT_OPTIONS.items()):
-        with col:
-            if st.checkbox(info["label"], value=True, key=f"agent_{key}", help=info["desc"]):
-                selected.append(key)
-
-    if not selected:
-        st.warning("Select at least one agent.")
-        return
-
-    # ── Phase 2 button ──────────────────────────────────────────────────
-    if st.button(f"🚀  Run {len(selected)} Agent{'s' if len(selected)>1 else ''}", use_container_width=True, type="primary"):
-        _phase_analyze(state, selected)
+    st.session_state.ingest_state = state
 
 
 def _phase_analyze(state, selected_categories: list[str]):
-    """Phase 2: run selected agents, debate, report."""
+    """Phase 2 — run agents, debate, generate report. Saves to session state."""
     log, bar, t0 = _make_logger()
     log("start", f"🚀 Launching {len(selected_categories)} agents: {', '.join(selected_categories)}", 0.18)
 
@@ -211,10 +263,11 @@ def _phase_analyze(state, selected_categories: list[str]):
         st.error(state.error)
         return
 
-    _render_report(state)
+    st.session_state.review_state = state
 
 
 # ── Graph visualization ─────────────────────────────────────────────────
+
 def _render_graph(G):
     try:
         from pyvis.network import Network
@@ -233,7 +286,7 @@ def _render_graph(G):
     NCOL = {"file": "#6366f1", "function": "#22d3ee", "class": "#f59e0b", "struct": "#f59e0b"}
     ECOL = {"defines": "#4b5563", "imports": "#3b82f6", "calls": "#ef4444"}
 
-    net = Network(height="420px", width="100%", bgcolor="#0f172a", font_color="#e2e8f0", directed=True)
+    net = Network(height="420px", width="100%", bgcolor="#0d1117", font_color="#c9d1d9", directed=True)
     net.barnes_hut(gravity=-2500, central_gravity=0.3, spring_length=100, spring_strength=0.04, damping=0.09)
 
     for node in sub:
@@ -243,12 +296,12 @@ def _render_graph(G):
         sz = 8 + min(G.degree(node) * 2, 25)
         sh = "dot" if nt == "file" else ("diamond" if nt in ("class", "struct") else "triangle")
         net.add_node(node, label=label, title=f"{node}\n{nt} · {G.degree(node)} connections",
-                     color=NCOL.get(nt, "#9ca3af"), size=sz, shape=sh)
+                     color=NCOL.get(nt, "#8b949e"), size=sz, shape=sh)
 
     for u, v, ed in G.edges(data=True):
         if u in sub and v in sub:
             rel = ed.get("relation", "")
-            net.add_edge(u, v, title=rel, color=ECOL.get(rel, "#6b7280"),
+            net.add_edge(u, v, title=rel, color=ECOL.get(rel, "#484f58"),
                          width=1.5 if rel == "calls" else 1, arrows="to")
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w")
@@ -259,20 +312,21 @@ def _render_graph(G):
     os.unlink(tmp.name)
 
     st.markdown(
-        '<div style="display:flex;gap:1rem;font-size:0.75rem;color:#9ca3af;margin-bottom:0.4rem;">'
+        '<div style="display:flex;gap:1.2rem;font-size:0.75rem;color:#8b949e;margin-bottom:0.5rem;">'
         '<span>● <span style="color:#6366f1">File</span></span>'
         '<span>▲ <span style="color:#22d3ee">Function</span></span>'
         '<span>◆ <span style="color:#f59e0b">Class</span></span>'
-        '<span style="margin-left:0.5rem">— <span style="color:#3b82f6">imports</span></span>'
+        '<span style="margin-left:auto">— <span style="color:#3b82f6">imports</span></span>'
         '<span>— <span style="color:#ef4444">calls</span></span>'
         '<span>— <span style="color:#4b5563">defines</span></span></div>',
         unsafe_allow_html=True,
     )
-    components.html(html, height=440, scrolling=False)
+    st.html(html, height=440)
     st.caption(f"{min(show, node_count)}/{node_count} nodes · {G.number_of_edges()} edges · drag & zoom to explore")
 
 
 # ── Report rendering ────────────────────────────────────────────────────
+
 def _render_report(state):
     report = state.report
     findings = state.verified_findings
@@ -296,7 +350,6 @@ def _render_report(state):
         unsafe_allow_html=True,
     )
 
-    # ── Breakdown ───────────────────────────────────────────────────────
     col_l, col_r = st.columns(2)
     with col_l:
         st.markdown("**By Severity**")
@@ -309,7 +362,6 @@ def _render_report(state):
         for agent, cnt in report.get("agent_stats", {}).items():
             st.markdown(f'<span class="a-tag">{agent}</span> {cnt} raw', unsafe_allow_html=True)
 
-    # ── Findings ────────────────────────────────────────────────────────
     st.markdown('<div class="sec">🔍 Findings</div>', unsafe_allow_html=True)
 
     tabs_data = []
@@ -327,7 +379,6 @@ def _render_report(state):
     else:
         st.success("No significant findings — codebase looks healthy. 🎉")
 
-    # ── Export ──────────────────────────────────────────────────────────
     c1, c2 = st.columns(2)
     with c1:
         html_content = report.get("html", "")
