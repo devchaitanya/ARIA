@@ -46,7 +46,7 @@ class DebateManager:
                     logger.info(
                         f"  {verifier.name} -> {vote.get('verdict', 'UNKNOWN')} on '{finding.title}'"
                     )
-                    time.sleep(1.5)  # Rate limit spacing between verification calls
+                    time.sleep(2.5)  # Rate limit spacing between verification calls
                 except Exception as e:
                     logger.warning(f"  {verifier.name} failed to verify: {e}")
                     votes.append({"verdict": "ABSTAIN", "reasoning": str(e)})

@@ -99,7 +99,7 @@ def node_review(state: ReviewState, on_progress=None) -> ReviewState:
         if on_progress:
             pct = 0.18 + ((i + 1) / total_agents) * 0.37
             on_progress("agent_done", f"  ✓ {name}: {len(findings)} findings", pct)
-        time.sleep(2)  # Rate-limit spacing between agents
+        time.sleep(3)  # Rate-limit spacing between agents
 
     state.all_findings = all_findings
     if on_progress:
