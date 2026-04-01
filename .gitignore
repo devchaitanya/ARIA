@@ -7,3 +7,4 @@ repos/
 *.egg-info/
 dist/
 build/
+lib/

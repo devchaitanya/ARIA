@@ -9,349 +9,325 @@ import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.orchestrator.graph import run_pipeline
+from src.orchestrator.graph import run_ingest, run_analysis
 from src.agents.base_agent import Finding
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-st.set_page_config(page_title="ARIA — Code Review", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="ARIA — Code Review", page_icon="🤖", layout="centered")
 
-SEVERITY_COLORS = {"critical": "#DC2626", "high": "#EA580C", "medium": "#CA8A04", "low": "#16A34A"}
 SEVERITY_ICONS = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}
 CATEGORY_ICONS = {
     "security": "🛡️", "quality": "🔧", "architecture": "🏗️",
     "performance": "⚡", "ai_slop": "🧹",
 }
 
-# ── Custom CSS ──────────────────────────────────────────────────────────
-CUSTOM_CSS = """
+AGENT_OPTIONS = {
+    "security":     {"label": "🛡️ Security",      "desc": "OWASP Top 10, injection, secrets, auth"},
+    "quality":      {"label": "🔧 Code Quality",   "desc": "Complexity, dead code, error handling"},
+    "architecture": {"label": "🏗️ Architecture",   "desc": "SOLID, coupling, layering, dependencies"},
+    "performance":  {"label": "⚡ Performance",     "desc": "Algorithms, N+1 queries, memory, caching"},
+    "ai_slop":      {"label": "🧹 AI-Slop",        "desc": "Over-abstraction, cargo-cult patterns"},
+}
+
+# ── Compact CSS ─────────────────────────────────────────────────────────
+CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-/* Global */
 .stApp { font-family: 'Inter', sans-serif; }
 
-/* Header */
-.aria-hero {
-    background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-    border-radius: 16px;
-    padding: 2.5rem 2rem;
-    margin-bottom: 1.5rem;
-    text-align: center;
-    color: white;
-}
-.aria-hero h1 {
-    font-size: 2.4rem;
-    font-weight: 700;
-    margin: 0 0 0.4rem 0;
-    letter-spacing: -0.5px;
-}
-.aria-hero p {
-    font-size: 1.05rem;
-    opacity: 0.85;
-    margin: 0;
-}
+/* Compact hero */
+.hero { text-align:center; padding:1.5rem 0 1rem; }
+.hero h1 { font-size:1.8rem; font-weight:700; margin:0; letter-spacing:-0.5px; }
+.hero p { font-size:0.88rem; opacity:0.6; margin:0.2rem 0 0; }
 
-/* Metric cards */
-.metric-card {
-    background: linear-gradient(135deg, #1e1e2e, #2a2a40);
-    border: 1px solid #3a3a5c;
-    border-radius: 14px;
-    padding: 1.3rem 1.2rem;
-    text-align: center;
-    transition: transform 0.2s;
+/* Live log */
+.live-log {
+    background:#111827; border:1px solid #1f2937; border-radius:10px;
+    padding:0.8rem 1rem; max-height:320px; overflow-y:auto;
+    font-family:'JetBrains Mono','Fira Code',monospace; font-size:0.78rem;
 }
-.metric-card:hover { transform: translateY(-2px); }
-.metric-card .label {
-    font-size: 0.78rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    color: #9ca3af;
-    margin-bottom: 0.3rem;
-}
-.metric-card .value {
-    font-size: 1.9rem;
-    font-weight: 700;
-    color: #f9fafb;
-}
-.metric-card .sub { font-size: 0.8rem; color: #6b7280; margin-top: 0.15rem; }
+.log-row { display:flex; gap:0.5rem; padding:0.2rem 0; border-bottom:1px solid #1a1a2e; animation:fadeIn .25s; }
+.log-row:last-child { border-bottom:none; }
+.log-t { color:#6b7280; min-width:42px; flex-shrink:0; font-size:0.7rem; padding-top:1px; }
+.log-m { color:#d1d5db; line-height:1.4; }
+.log-m.ok { color:#34d399; }
+.log-m.run { color:#60a5fa; }
+.log-m.err { color:#f87171; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(3px)} to{opacity:1;transform:translateY(0)} }
 
-/* Progress timeline */
-.timeline-container {
-    background: #111827;
-    border: 1px solid #1f2937;
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    max-height: 420px;
-    overflow-y: auto;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 0.82rem;
-}
-.timeline-entry {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.6rem;
-    padding: 0.35rem 0;
-    border-bottom: 1px solid #1f2937;
-    animation: fadeIn 0.3s ease-in;
-}
-.timeline-entry:last-child { border-bottom: none; }
-.tl-time {
-    color: #6b7280;
-    font-size: 0.72rem;
-    min-width: 48px;
-    padding-top: 2px;
-    flex-shrink: 0;
-}
-.tl-msg { color: #d1d5db; line-height: 1.45; }
-.tl-msg.done { color: #34d399; }
-.tl-msg.active { color: #60a5fa; }
-.tl-msg.error { color: #f87171; }
+/* Scrollbar */
+.live-log::-webkit-scrollbar { width:5px; }
+.live-log::-webkit-scrollbar-track { background:#111827; }
+.live-log::-webkit-scrollbar-thumb { background:#374151; border-radius:3px; }
 
-@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-
-/* Finding card */
-.finding-card {
-    background: #1e1e2e;
-    border: 1px solid #2d2d44;
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.8rem;
+/* Metric row */
+.m-row { display:flex; gap:0.8rem; justify-content:center; flex-wrap:wrap; margin:1rem 0; }
+.m-card {
+    background:linear-gradient(135deg,#1e1e2e,#2a2a40); border:1px solid #3a3a5c;
+    border-radius:12px; padding:0.9rem 1.1rem; text-align:center; min-width:120px; flex:1;
 }
-.finding-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-}
+.m-card .m-label { font-size:0.68rem; font-weight:600; text-transform:uppercase; letter-spacing:0.7px; color:#9ca3af; }
+.m-card .m-val { font-size:1.6rem; font-weight:700; color:#f9fafb; margin:0.15rem 0; }
+.m-card .m-sub { font-size:0.72rem; color:#6b7280; }
 
 /* Severity pills */
-.sev-pill {
-    display: inline-block;
-    padding: 0.15rem 0.65rem;
-    border-radius: 20px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-.sev-critical { background: #450a0a; color: #fca5a5; border: 1px solid #7f1d1d; }
-.sev-high     { background: #431407; color: #fdba74; border: 1px solid #7c2d12; }
-.sev-medium   { background: #422006; color: #fcd34d; border: 1px solid #78350f; }
-.sev-low      { background: #052e16; color: #86efac; border: 1px solid #14532d; }
-
-/* Section header */
-.section-hdr {
-    font-size: 1.25rem;
-    font-weight: 700;
-    padding-bottom: 0.5rem;
-    margin-top: 1.5rem;
-    margin-bottom: 1rem;
-    border-bottom: 2px solid #302b63;
-    color: #e5e7eb;
-}
+.sev-pill { display:inline-block; padding:0.1rem 0.55rem; border-radius:16px; font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.4px; }
+.sev-critical { background:#450a0a; color:#fca5a5; border:1px solid #7f1d1d; }
+.sev-high     { background:#431407; color:#fdba74; border:1px solid #7c2d12; }
+.sev-medium   { background:#422006; color:#fcd34d; border:1px solid #78350f; }
+.sev-low      { background:#052e16; color:#86efac; border:1px solid #14532d; }
 
 /* Agent tag */
-.agent-tag {
-    display: inline-block;
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 8px;
-    padding: 0.2rem 0.6rem;
-    font-size: 0.75rem;
-    color: #94a3b8;
-    margin-right: 0.4rem;
-}
+.a-tag { display:inline-block; background:#1e293b; border:1px solid #334155; border-radius:6px; padding:0.15rem 0.5rem; font-size:0.7rem; color:#94a3b8; margin-right:0.3rem; }
 
-/* Hide default Streamlit metric styling for our custom cards */
-div[data-testid="stMetric"] { display: none; }
+/* Section */
+.sec { font-size:1.1rem; font-weight:700; color:#e5e7eb; border-bottom:2px solid #302b63; padding-bottom:0.3rem; margin:1.2rem 0 0.8rem; }
 
-/* Smooth scrollbar for timeline */
-.timeline-container::-webkit-scrollbar { width: 6px; }
-.timeline-container::-webkit-scrollbar-track { background: #111827; }
-.timeline-container::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+/* Hide default metrics */
+div[data-testid="stMetric"] { display:none; }
 </style>
 """
 
 
-def inject_css():
-    st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
-
-
-def render_metric_card(label: str, value: str, sub: str = ""):
-    sub_html = f'<div class="sub">{sub}</div>' if sub else ""
-    st.markdown(
-        f'<div class="metric-card">'
-        f'<div class="label">{label}</div>'
-        f'<div class="value">{value}</div>'
-        f'{sub_html}</div>',
-        unsafe_allow_html=True,
-    )
-
-
 def main():
-    inject_css()
+    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown('<div class="hero"><h1>🤖 ARIA</h1><p>Multi-LLM Code Review · Model Debate Protocol</p></div>', unsafe_allow_html=True)
 
-    # ── Hero banner ─────────────────────────────────────────────────────
-    st.markdown(
-        '<div class="aria-hero">'
-        '<h1>🤖 ARIA</h1>'
-        '<p>Adaptive Review Intelligence Architecture — Multi-LLM Code Review with Model Debate Protocol</p>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+    # ── Input row ───────────────────────────────────────────────────────
+    c1, c2 = st.columns([4, 1])
+    with c1:
+        repo_url = st.text_input("Repository", placeholder="https://github.com/user/repo", label_visibility="collapsed")
+    with c2:
+        branch = st.text_input("Branch", value="main", label_visibility="collapsed")
 
-    # ── Input area ──────────────────────────────────────────────────────
-    with st.container():
-        col1, col2, col3 = st.columns([5, 1.5, 1.5])
-        with col1:
-            repo_url = st.text_input(
-                "Repository URL",
-                placeholder="https://github.com/user/repo",
-                label_visibility="collapsed",
-            )
-        with col2:
-            branch = st.text_input("Branch", value="main", label_visibility="collapsed")
-        with col3:
-            run_btn = st.button("🚀 Start Review", type="primary", use_container_width=True)
-
-    if run_btn:
+    # ── Phase 1: Ingest ─────────────────────────────────────────────────
+    if st.button("🔍  Analyze Repository", use_container_width=True, type="primary"):
         if not repo_url or "github.com" not in repo_url:
-            st.error("Please enter a valid GitHub repository URL.")
+            st.error("Enter a valid GitHub repo URL.")
             return
-        run_review(repo_url, branch)
+        _phase_ingest(repo_url, branch)
 
 
-def run_review(repo_url: str, branch: str):
-    """Execute the full review pipeline with a live progress timeline."""
+def _make_logger():
+    """Create a reusable progress logger (timeline + progress bar)."""
+    bar = st.progress(0, text="Starting…")
+    placeholder = st.empty()
+    entries: list[dict] = []
+    t0 = time.time()
 
-    # ── progress state ──────────────────────────────────────────────────
-    progress_bar = st.progress(0, text="Initializing…")
-    timeline_placeholder = st.empty()
-    log_entries: list[dict] = []
-    start_time = time.time()
-
-    def _render_timeline():
-        """Re-render the full timeline HTML from log_entries."""
-        rows = ""
-        for entry in log_entries:
-            css_class = entry.get("cls", "")
-            rows += (
-                f'<div class="timeline-entry">'
-                f'<span class="tl-time">{entry["ts"]}</span>'
-                f'<span class="tl-msg {css_class}">{entry["msg"]}</span>'
-                f'</div>'
-            )
-        timeline_placeholder.markdown(
-            f'<div class="timeline-container">{rows}</div>',
-            unsafe_allow_html=True,
+    def _render():
+        rows = "".join(
+            f'<div class="log-row"><span class="log-t">{e["ts"]}</span>'
+            f'<span class="log-m {e["c"]}">{e["m"]}</span></div>'
+            for e in entries
         )
+        placeholder.markdown(f'<div class="live-log">{rows}</div>', unsafe_allow_html=True)
 
-    def on_progress(stage: str, message: str, pct: float):
-        elapsed = time.time() - start_time
+    def log(stage: str, msg: str, pct: float):
+        elapsed = time.time() - t0
         mins, secs = divmod(int(elapsed), 60)
         ts = f"{mins}:{secs:02d}"
+        cls = "ok" if stage.endswith("_done") or stage in ("ingested", "debate_done", "complete") else (
+            "err" if "error" in stage or "fail" in stage else "run"
+        )
+        entries.append({"ts": ts, "m": msg, "c": cls})
+        bar.progress(min(pct, 1.0), text=msg)
+        _render()
 
-        css_cls = "active"
-        if stage.endswith("_done") or stage in ("ingested", "debate_done"):
-            css_cls = "done"
-        elif "fail" in stage.lower() or "error" in stage.lower():
-            css_cls = "error"
+    return log, bar, t0
 
-        log_entries.append({"ts": ts, "msg": message, "cls": css_cls})
-        progress_bar.progress(min(pct, 1.0), text=message)
-        _render_timeline()
+
+def _phase_ingest(repo_url: str, branch: str):
+    """Phase 1: clone, parse, build graph — then show graph + agent picker."""
+    log, bar, t0 = _make_logger()
 
     try:
-        state = run_pipeline(repo_url, branch, on_progress=on_progress)
+        state = run_ingest(repo_url, branch, on_progress=log)
     except Exception as e:
-        on_progress("error", f"❌ Pipeline error: {e}", 1.0)
-        st.error(f"Pipeline failed: {str(e)}")
+        log("error", f"❌ Ingestion failed: {e}", 1.0)
         return
-
-    elapsed = time.time() - start_time
-    on_progress("complete", f"✅ Review complete in {elapsed:.1f}s", 1.0)
-    progress_bar.progress(1.0, text=f"Done — {elapsed:.1f}s")
 
     if state.status == "failed":
-        st.error(f"Review failed: {state.error}")
+        st.error(state.error)
         return
 
-    render_report(state)
+    elapsed = time.time() - t0
+    log("ingested", f"✅ Repository indexed in {elapsed:.1f}s — {len(state.files)} files, "
+        f"{state.graph_stats.get('total_nodes', 0)} nodes", 0.18)
+
+    # ── Show graph stats ────────────────────────────────────────────────
+    gs = state.graph_stats
+    st.markdown(
+        f'<div class="m-row">'
+        f'<div class="m-card"><div class="m-label">Files</div><div class="m-val">{gs.get("total_files",0)}</div></div>'
+        f'<div class="m-card"><div class="m-label">Functions</div><div class="m-val">{gs.get("functions",0)}</div></div>'
+        f'<div class="m-card"><div class="m-label">Classes</div><div class="m-val">{gs.get("classes",0)}</div></div>'
+        f'<div class="m-card"><div class="m-label">Edges</div><div class="m-val">{gs.get("total_edges",0)}</div></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Show knowledge graph ────────────────────────────────────────────
+    if state.knowledge_graph is not None:
+        _render_graph(state.knowledge_graph)
+
+    # ── Agent selection ─────────────────────────────────────────────────
+    st.markdown('<div class="sec">🤖 Select Review Agents</div>', unsafe_allow_html=True)
+    st.caption("Choose which analysis to run. More agents = deeper review but longer wait.")
+
+    selected = []
+    cols = st.columns(len(AGENT_OPTIONS))
+    for col, (key, info) in zip(cols, AGENT_OPTIONS.items()):
+        with col:
+            if st.checkbox(info["label"], value=True, key=f"agent_{key}", help=info["desc"]):
+                selected.append(key)
+
+    if not selected:
+        st.warning("Select at least one agent.")
+        return
+
+    # ── Phase 2 button ──────────────────────────────────────────────────
+    if st.button(f"🚀  Run {len(selected)} Agent{'s' if len(selected)>1 else ''}", use_container_width=True, type="primary"):
+        _phase_analyze(state, selected)
+
+
+def _phase_analyze(state, selected_categories: list[str]):
+    """Phase 2: run selected agents, debate, report."""
+    log, bar, t0 = _make_logger()
+    log("start", f"🚀 Launching {len(selected_categories)} agents: {', '.join(selected_categories)}", 0.18)
+
+    try:
+        state = run_analysis(state, on_progress=log, selected_categories=selected_categories)
+    except Exception as e:
+        log("error", f"❌ Analysis failed: {e}", 1.0)
+        return
+
+    elapsed = time.time() - t0
+    log("complete", f"✅ Review complete in {elapsed:.1f}s", 1.0)
+    bar.progress(1.0, text=f"Done — {elapsed:.1f}s")
+
+    if state.status == "failed":
+        st.error(state.error)
+        return
+
+    _render_report(state)
+
+
+# ── Graph visualization ─────────────────────────────────────────────────
+def _render_graph(G):
+    try:
+        from pyvis.network import Network
+    except ImportError:
+        return
+
+    st.markdown('<div class="sec">🔗 Knowledge Graph</div>', unsafe_allow_html=True)
+
+    node_count = G.number_of_nodes()
+    max_n = min(node_count, 250)
+    show = st.slider("Nodes to show", 15, max_n, min(80, max_n), key="graph_nodes")
+
+    ranked = sorted(G.nodes(), key=lambda n: G.degree(n), reverse=True)[:show]
+    sub = set(ranked)
+
+    NCOL = {"file": "#6366f1", "function": "#22d3ee", "class": "#f59e0b", "struct": "#f59e0b"}
+    ECOL = {"defines": "#4b5563", "imports": "#3b82f6", "calls": "#ef4444"}
+
+    net = Network(height="420px", width="100%", bgcolor="#0f172a", font_color="#e2e8f0", directed=True)
+    net.barnes_hut(gravity=-2500, central_gravity=0.3, spring_length=100, spring_strength=0.04, damping=0.09)
+
+    for node in sub:
+        d = G.nodes[node]
+        nt = d.get("type", "file")
+        label = node.split("::")[-1] if "::" in node else (node.split("/")[-1] if "/" in node else node)
+        sz = 8 + min(G.degree(node) * 2, 25)
+        sh = "dot" if nt == "file" else ("diamond" if nt in ("class", "struct") else "triangle")
+        net.add_node(node, label=label, title=f"{node}\n{nt} · {G.degree(node)} connections",
+                     color=NCOL.get(nt, "#9ca3af"), size=sz, shape=sh)
+
+    for u, v, ed in G.edges(data=True):
+        if u in sub and v in sub:
+            rel = ed.get("relation", "")
+            net.add_edge(u, v, title=rel, color=ECOL.get(rel, "#6b7280"),
+                         width=1.5 if rel == "calls" else 1, arrows="to")
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w")
+    net.save_graph(tmp.name)
+    tmp.close()
+    with open(tmp.name) as f:
+        html = f.read()
+    os.unlink(tmp.name)
+
+    st.markdown(
+        '<div style="display:flex;gap:1rem;font-size:0.75rem;color:#9ca3af;margin-bottom:0.4rem;">'
+        '<span>● <span style="color:#6366f1">File</span></span>'
+        '<span>▲ <span style="color:#22d3ee">Function</span></span>'
+        '<span>◆ <span style="color:#f59e0b">Class</span></span>'
+        '<span style="margin-left:0.5rem">— <span style="color:#3b82f6">imports</span></span>'
+        '<span>— <span style="color:#ef4444">calls</span></span>'
+        '<span>— <span style="color:#4b5563">defines</span></span></div>',
+        unsafe_allow_html=True,
+    )
+    components.html(html, height=440, scrolling=False)
+    st.caption(f"{min(show, node_count)}/{node_count} nodes · {G.number_of_edges()} edges · drag & zoom to explore")
 
 
 # ── Report rendering ────────────────────────────────────────────────────
-def render_report(state):
+def _render_report(state):
     report = state.report
     findings = state.verified_findings
 
-    st.markdown('<div class="section-hdr">📋 Review Report</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec">📋 Review Report</div>', unsafe_allow_html=True)
 
-    # ── Metric cards ────────────────────────────────────────────────────
     health = report.get("health_score", 0)
     slop = report.get("slop_score", 0)
     total = report.get("total_findings", 0)
-    files_count = report.get("graph_stats", {}).get("total_files", 0)
+    files_n = report.get("graph_stats", {}).get("total_files", 0)
+    h_e = "🟢" if health >= 70 else ("🟡" if health >= 40 else "🔴")
+    s_e = "🟢" if slop < 15 else ("🟡" if slop < 35 else "🔴")
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        h_emoji = "🟢" if health >= 70 else ("🟡" if health >= 40 else "🔴")
-        render_metric_card("Health Score", f"{h_emoji} {health}", "/100")
-    with c2:
-        s_emoji = "🟢" if slop < 15 else ("🟡" if slop < 35 else "🔴")
-        render_metric_card("Slop Risk", f"{s_emoji} {slop}%", "lower is better")
-    with c3:
-        render_metric_card("Findings", str(total), "verified issues")
-    with c4:
-        render_metric_card("Files", str(files_count), "analyzed")
+    st.markdown(
+        f'<div class="m-row">'
+        f'<div class="m-card"><div class="m-label">Health</div><div class="m-val">{h_e} {health}</div><div class="m-sub">/100</div></div>'
+        f'<div class="m-card"><div class="m-label">Slop Risk</div><div class="m-val">{s_e} {slop}%</div><div class="m-sub">lower = better</div></div>'
+        f'<div class="m-card"><div class="m-label">Findings</div><div class="m-val">{total}</div><div class="m-sub">verified</div></div>'
+        f'<div class="m-card"><div class="m-label">Files</div><div class="m-val">{files_n}</div><div class="m-sub">analyzed</div></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
-    # ── Knowledge Graph Visualization ─────────────────────────────────
-    if state.knowledge_graph is not None:
-        render_knowledge_graph(state.knowledge_graph)
-
-    # ── Severity summary + Agent contributions ──────────────────────────
-    st.markdown('<div class="section-hdr">📊 Breakdown</div>', unsafe_allow_html=True)
-
+    # ── Breakdown ───────────────────────────────────────────────────────
     col_l, col_r = st.columns(2)
     with col_l:
-        st.markdown("**Findings by Severity**")
+        st.markdown("**By Severity**")
         for sev in ["critical", "high", "medium", "low"]:
-            count = report.get("by_severity", {}).get(sev, 0)
-            if count > 0:
-                st.markdown(
-                    f'<span class="sev-pill sev-{sev}">{sev}</span> &nbsp;**{count}**',
-                    unsafe_allow_html=True,
-                )
+            cnt = report.get("by_severity", {}).get(sev, 0)
+            if cnt:
+                st.markdown(f'<span class="sev-pill sev-{sev}">{sev}</span> **{cnt}**', unsafe_allow_html=True)
     with col_r:
-        st.markdown("**Agent Contributions**")
-        for agent, count in report.get("agent_stats", {}).items():
-            icon = CATEGORY_ICONS.get(agent.split("Agent")[0].lower().replace(" ", "_"), "🤖")
-            st.markdown(f'{icon} <span class="agent-tag">{agent}</span> {count} raw findings', unsafe_allow_html=True)
+        st.markdown("**Agent Stats**")
+        for agent, cnt in report.get("agent_stats", {}).items():
+            st.markdown(f'<span class="a-tag">{agent}</span> {cnt} raw', unsafe_allow_html=True)
 
-    # ── Detailed findings ───────────────────────────────────────────────
-    st.markdown('<div class="section-hdr">🔍 Detailed Findings</div>', unsafe_allow_html=True)
+    # ── Findings ────────────────────────────────────────────────────────
+    st.markdown('<div class="sec">🔍 Findings</div>', unsafe_allow_html=True)
 
-    tab_labels = []
-    tab_findings = []
+    tabs_data = []
     for sev in ["critical", "high", "medium", "low"]:
         items = [f for f in findings if f.severity == sev]
         if items:
-            tab_labels.append(f"{SEVERITY_ICONS[sev]} {sev.upper()} ({len(items)})")
-            tab_findings.append(items)
+            tabs_data.append((f"{SEVERITY_ICONS[sev]} {sev.upper()} ({len(items)})", items))
 
-    if tab_labels:
-        tabs = st.tabs(tab_labels)
-        for tab, items in zip(tabs, tab_findings):
+    if tabs_data:
+        tabs = st.tabs([t[0] for t in tabs_data])
+        for tab, (_, items) in zip(tabs, tabs_data):
             with tab:
                 for f in items:
-                    render_finding(f)
+                    _render_finding(f)
     else:
-        st.success("No significant findings — the codebase looks healthy. 🎉")
+        st.success("No significant findings — codebase looks healthy. 🎉")
 
     # ── Export ──────────────────────────────────────────────────────────
-    st.markdown('<div class="section-hdr">📥 Export</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
         html_content = report.get("html", "")
@@ -359,143 +335,11 @@ def render_report(state):
             st.download_button("📄 HTML Report", html_content, "aria_report.html", "text/html", use_container_width=True)
     with c2:
         json_data = {k: v for k, v in report.items() if k != "html"}
-        st.download_button(
-            "📊 JSON Data",
-            json.dumps(json_data, indent=2, default=str),
-            "aria_report.json",
-            "application/json",
-            use_container_width=True,
-        )
+        st.download_button("📊 JSON", json.dumps(json_data, indent=2, default=str),
+                           "aria_report.json", "application/json", use_container_width=True)
 
 
-def render_knowledge_graph(G):
-    """Render an interactive knowledge graph using pyvis."""
-    try:
-        from pyvis.network import Network
-    except ImportError:
-        st.warning("Install `pyvis` to see the interactive graph: `pip install pyvis`")
-        return
-
-    st.markdown('<div class="section-hdr">🔗 Knowledge Graph</div>', unsafe_allow_html=True)
-
-    # ── Controls ────────────────────────────────────────────────────────
-    node_count = G.number_of_nodes()
-    max_nodes = min(node_count, 300)
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        show_limit = st.slider(
-            "Max nodes to display", 20, max_nodes, min(100, max_nodes),
-            help="Large graphs are capped for performance",
-        )
-    with col2:
-        edge_filter = st.multiselect(
-            "Edge types",
-            ["defines", "imports", "calls"],
-            default=["defines", "imports", "calls"],
-        )
-
-    # ── Build subgraph with limit ───────────────────────────────────────
-    # Prioritize high-degree nodes for a meaningful view
-    ranked = sorted(G.nodes(), key=lambda n: G.degree(n), reverse=True)[:show_limit]
-    sub_nodes = set(ranked)
-
-    # ── Color palette ───────────────────────────────────────────────────
-    NODE_COLORS = {
-        "file": "#6366f1",       # indigo
-        "function": "#22d3ee",   # cyan
-        "class": "#f59e0b",      # amber
-        "struct": "#f59e0b",
-    }
-    EDGE_COLORS = {
-        "defines": "#4b5563",
-        "imports": "#3b82f6",
-        "calls": "#ef4444",
-    }
-
-    # ── Build pyvis network ─────────────────────────────────────────────
-    net = Network(
-        height="520px",
-        width="100%",
-        bgcolor="#0f172a",
-        font_color="#e2e8f0",
-        directed=True,
-    )
-    net.barnes_hut(
-        gravity=-3000,
-        central_gravity=0.3,
-        spring_length=120,
-        spring_strength=0.04,
-        damping=0.09,
-    )
-
-    for node in sub_nodes:
-        data = G.nodes[node]
-        ntype = data.get("type", "file")
-        color = NODE_COLORS.get(ntype, "#9ca3af")
-
-        # Shorten label for readability
-        if "::" in node:
-            label = node.split("::")[-1]
-        else:
-            label = node.split("/")[-1] if "/" in node else node
-
-        size = 10 + min(G.degree(node) * 2, 30)
-        shape = "dot" if ntype == "file" else ("diamond" if ntype in ("class", "struct") else "triangle")
-
-        net.add_node(
-            node,
-            label=label,
-            title=f"{node}\nType: {ntype}\nConnections: {G.degree(node)}",
-            color=color,
-            size=size,
-            shape=shape,
-        )
-
-    for u, v, data in G.edges(data=True):
-        if u in sub_nodes and v in sub_nodes:
-            rel = data.get("relation", "unknown")
-            if rel not in edge_filter:
-                continue
-            net.add_edge(
-                u, v,
-                title=rel,
-                color=EDGE_COLORS.get(rel, "#6b7280"),
-                width=1.5 if rel == "calls" else 1,
-                arrows="to",
-            )
-
-    # ── Render to HTML and embed ────────────────────────────────────────
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w")
-    net.save_graph(tmp.name)
-    tmp.close()
-
-    with open(tmp.name, "r") as f:
-        html = f.read()
-    os.unlink(tmp.name)
-
-    # Legend row
-    st.markdown(
-        '<div style="display:flex;gap:1.2rem;margin-bottom:0.6rem;font-size:0.8rem;color:#9ca3af;">'
-        '<span>● <span style="color:#6366f1">File</span></span>'
-        '<span>▲ <span style="color:#22d3ee">Function</span></span>'
-        '<span>◆ <span style="color:#f59e0b">Class</span></span>'
-        '<span>— <span style="color:#3b82f6">imports</span></span>'
-        '<span>— <span style="color:#ef4444">calls</span></span>'
-        '<span>— <span style="color:#4b5563">defines</span></span>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    components.html(html, height=540, scrolling=False)
-
-    st.caption(
-        f"Showing {min(show_limit, node_count)} of {node_count} nodes · "
-        f"{G.number_of_edges()} edges · Interactive — drag, zoom, hover for details"
-    )
-
-
-def render_finding(f):
+def _render_finding(f):
     sev = f.severity
     cat_icon = CATEGORY_ICONS.get(f.category, "📌")
     sev_icon = SEVERITY_ICONS.get(sev, "⚪")
@@ -504,11 +348,10 @@ def render_finding(f):
     with st.expander(f"{sev_icon} {cat_icon} {f.title}  —  `{f.file}{loc}`  ({f.confidence:.0%})"):
         st.markdown(
             f'<span class="sev-pill sev-{sev}">{sev}</span> '
-            f'<span class="agent-tag">{f.agent}</span> '
-            f'<span class="agent-tag">{f.category}</span>',
+            f'<span class="a-tag">{f.agent}</span> <span class="a-tag">{f.category}</span>',
             unsafe_allow_html=True,
         )
-        st.markdown(f"\n{f.description}")
+        st.markdown(f.description)
         if f.suggestion:
             st.info(f"💡 **Suggestion:** {f.suggestion}")
 

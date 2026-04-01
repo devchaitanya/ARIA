@@ -17,14 +17,24 @@ from src.config import SUPPORTED_EXTENSIONS, MAX_FILE_SIZE, MAX_FILES
 logger = logging.getLogger(__name__)
 
 
-def create_agents():
-    return [
+def create_agents(selected_categories: list[str] | None = None):
+    all_agents = [
         SecurityAgent(),
         QualityAgent(),
         ArchitectureAgent(),
         PerformanceAgent(),
         SlopDetectorAgent(),
     ]
+    if selected_categories is None:
+        return all_agents
+    category_map = {
+        "security": SecurityAgent,
+        "quality": QualityAgent,
+        "architecture": ArchitectureAgent,
+        "performance": PerformanceAgent,
+        "ai_slop": SlopDetectorAgent,
+    }
+    return [category_map[cat]() for cat in selected_categories if cat in category_map]
 
 
 def node_ingest(state: ReviewState, on_progress=None) -> ReviewState:
@@ -66,7 +76,7 @@ def node_ingest(state: ReviewState, on_progress=None) -> ReviewState:
     return state
 
 
-def node_review(state: ReviewState, on_progress=None) -> ReviewState:
+def node_review(state: ReviewState, on_progress=None, selected_categories=None) -> ReviewState:
     """Stage 2: Run specialized agent swarm sequentially."""
     if state.status == "failed":
         return state
@@ -74,7 +84,7 @@ def node_review(state: ReviewState, on_progress=None) -> ReviewState:
     logger.info("[REVIEW] Starting parallel agent review")
     state.status = "reviewing"
 
-    agents = create_agents()
+    agents = create_agents(selected_categories)
     all_findings = []
     total_agents = len(agents)
 
@@ -88,18 +98,30 @@ def node_review(state: ReviewState, on_progress=None) -> ReviewState:
             logger.error(f"  {agent.name} failed: {e}")
             return agent.name, []
 
+    # Agent descriptions for user-friendly progress
+    _AGENT_TIPS = {
+        "Security Auditor": "Tracing user inputs through SQL, shell, and file operations…",
+        "Code Quality Analyst": "Scanning for complexity, dead code, and resource leaks…",
+        "Architecture Reviewer": "Analyzing dependency chains and SOLID violations…",
+        "Performance Profiler": "Checking algorithms, N+1 queries, and memory patterns…",
+        "AI-Slop Detector": "Looking for over-abstraction and cargo-cult patterns…",
+    }
+
     # Run agents sequentially with delay to respect rate limits across providers
     import time
     for i, agent in enumerate(agents):
         if on_progress:
             pct = 0.18 + (i / total_agents) * 0.37
-            on_progress("agent", f"🧠 Agent {i+1}/{total_agents}: {agent.name} ({agent.provider}/{agent.model.split('/')[-1]})...", pct)
+            model_short = agent.model.split("/")[-1]
+            on_progress("agent", f"🧠 [{i+1}/{total_agents}] {agent.name} ({agent.provider} · {model_short})", pct)
+            tip = _AGENT_TIPS.get(agent.name, "Analyzing code…")
+            on_progress("agent_tip", f"   ↳ {tip}", pct)
         name, findings = run_agent(agent)
         state.agent_findings[name] = findings
         all_findings.extend(findings)
         if on_progress:
             pct = 0.18 + ((i + 1) / total_agents) * 0.37
-            on_progress("agent_done", f"  ✓ {name}: {len(findings)} findings", pct)
+            on_progress("agent_done", f"   ✓ {name} → {len(findings)} findings", pct)
         time.sleep(3)  # Rate-limit spacing between agents
 
     state.all_findings = all_findings
@@ -109,7 +131,7 @@ def node_review(state: ReviewState, on_progress=None) -> ReviewState:
     return state
 
 
-def node_debate(state: ReviewState, on_progress=None) -> ReviewState:
+def node_debate(state: ReviewState, on_progress=None, selected_categories=None) -> ReviewState:
     """Stage 3: Cross-verify findings via Model Debate Protocol."""
     if state.status == "failed":
         return state
@@ -119,7 +141,7 @@ def node_debate(state: ReviewState, on_progress=None) -> ReviewState:
     logger.info("[DEBATE] Starting cross-verification")
     state.status = "debating"
 
-    agents = create_agents()
+    agents = create_agents(selected_categories)
     debate_mgr = DebateManager(agents, state.files)
 
     try:
@@ -192,7 +214,7 @@ def node_report(state: ReviewState, on_progress=None) -> ReviewState:
     return state
 
 
-def run_pipeline(repo_url: str, branch: str = "main", on_progress=None) -> ReviewState:
+def run_pipeline(repo_url: str, branch: str = "main", on_progress=None, selected_categories=None) -> ReviewState:
     """Execute the full ARIA pipeline as a sequential state machine."""
     state = ReviewState(repo_url=repo_url, branch=branch)
 
@@ -201,8 +223,33 @@ def run_pipeline(repo_url: str, branch: str = "main", on_progress=None) -> Revie
         return state
 
     for attempt in range(state.max_retries + 1):
-        state = node_review(state, on_progress)
-        state = node_debate(state, on_progress)
+        state = node_review(state, on_progress, selected_categories)
+        state = node_debate(state, on_progress, selected_categories)
+        state = node_validate(state, on_progress)
+
+        if state.status != "reviewing":
+            break
+        logger.info(f"[PIPELINE] Retry {attempt + 1}")
+
+    state = node_report(state, on_progress)
+    return state
+
+
+def run_ingest(repo_url: str, branch: str = "main", on_progress=None) -> ReviewState:
+    """Phase 1: Clone + parse only. Returns state with graph ready for visualization."""
+    state = ReviewState(repo_url=repo_url, branch=branch)
+    state = node_ingest(state, on_progress)
+    return state
+
+
+def run_analysis(state: ReviewState, on_progress=None, selected_categories=None) -> ReviewState:
+    """Phase 2: Run agents, debate, validate, report on an already-ingested state."""
+    if state.status == "failed":
+        return state
+
+    for attempt in range(state.max_retries + 1):
+        state = node_review(state, on_progress, selected_categories)
+        state = node_debate(state, on_progress, selected_categories)
         state = node_validate(state, on_progress)
 
         if state.status != "reviewing":

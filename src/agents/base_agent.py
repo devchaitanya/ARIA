@@ -119,13 +119,22 @@ class BaseAgent(ABC):
 
     def _build_review_prompt(self, code_context: str, graph_summary: str) -> str:
         return (
-            f"Review the following codebase.\n\n"
-            f"Repository structure:\n{graph_summary}\n\n"
+            f"Review the following codebase. Analyze EVERY file deeply.\n\n"
+            f"Repository dependency graph:\n{graph_summary}\n\n"
             f"Source code:\n{code_context}\n\n"
+            f"INSTRUCTIONS:\n"
+            f"- Examine each file line-by-line for issues in your domain.\n"
+            f"- For each finding, you MUST include the exact code snippet that is problematic.\n"
+            f"- You MUST specify the exact file path and line number.\n"
+            f"- Explain WHY it is a problem and WHAT the real-world impact is.\n"
+            f"- In the suggestion, provide a concrete code fix, not just advice.\n\n"
             f"Provide your findings as a JSON array. Each finding must have:\n"
-            f'{{"file": "path", "line": number_or_null, "severity": "critical|high|medium|low", '
-            f'"category": "{self._get_category()}", "title": "short title", '
-            f'"description": "detailed explanation", "suggestion": "how to fix"}}\n\n'
+            f'{{"file": "exact/path/to/file.py", "line": line_number, '
+            f'"severity": "critical|high|medium|low", '
+            f'"category": "{self._get_category()}", "title": "short descriptive title", '
+            f'"description": "Detailed explanation with the problematic code quoted like: `code here`. '
+            f'Explain the impact.", '
+            f'"suggestion": "Concrete fix with example code"}}\n\n'
             f"Return ONLY a JSON array. No markdown, no explanation outside the JSON."
         )
 

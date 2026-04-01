@@ -77,24 +77,60 @@ def _add_call_edges(G: nx.DiGraph, path: str, content: str, file_symbols: dict):
 
 
 def get_graph_summary(kg: dict) -> str:
+    """Build a rich structural summary from the knowledge graph for agent context."""
     stats = kg["stats"]
+    G = kg["graph"]
     lines = [
-        f"Repository Knowledge Graph:",
-        f"  Files: {stats['total_files']}",
-        f"  Functions: {stats['functions']}",
-        f"  Classes: {stats['classes']}",
-        f"  Graph nodes: {stats['total_nodes']}",
-        f"  Graph edges: {stats['total_edges']}",
+        "=== Repository Knowledge Graph ===",
+        f"Files: {stats['total_files']} | Functions: {stats['functions']} | Classes: {stats['classes']}",
+        f"Graph: {stats['total_nodes']} nodes, {stats['total_edges']} edges",
     ]
 
-    G = kg["graph"]
-    if G.number_of_nodes() > 0:
-        try:
-            hubs = sorted(G.nodes(), key=lambda n: G.degree(n), reverse=True)[:5]
-            lines.append("  Most connected nodes:")
-            for h in hubs:
-                lines.append(f"    - {h} (degree: {G.degree(h)})")
-        except Exception:
-            pass
+    if G.number_of_nodes() == 0:
+        return "\n".join(lines)
+
+    # ── Hub files (most connected — likely core modules) ────────────────
+    file_nodes = [(n, G.degree(n)) for n, d in G.nodes(data=True) if d.get("type") == "file"]
+    file_nodes.sort(key=lambda x: x[1], reverse=True)
+    if file_nodes:
+        lines.append("\n--- Critical Hub Files (most connections = highest blast radius) ---")
+        for path, deg in file_nodes[:8]:
+            in_deg = G.in_degree(path)
+            out_deg = G.out_degree(path)
+            lines.append(f"  {path}  (in:{in_deg} out:{out_deg} total:{deg})")
+
+    # ── Import dependency chains ────────────────────────────────────────
+    import_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("relation") == "imports"]
+    if import_edges:
+        lines.append(f"\n--- Import Dependencies ({len(import_edges)} edges) ---")
+        for src, dst in import_edges[:20]:
+            lines.append(f"  {src} → {dst}")
+
+    # ── Call relationships ──────────────────────────────────────────────
+    call_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get("relation") == "calls"]
+    if call_edges:
+        lines.append(f"\n--- Cross-File Call Graph ({len(call_edges)} calls) ---")
+        for src, dst in call_edges[:20]:
+            dst_short = dst.split("::")[-1] if "::" in dst else dst
+            lines.append(f"  {src} calls {dst_short}")
+
+    # ── Files with no inbound imports (entry points / dead code) ───────
+    file_paths = {n for n, d in G.nodes(data=True) if d.get("type") == "file"}
+    imported_files = {v for u, v, d in G.edges(data=True) if d.get("relation") == "imports" and v in file_paths}
+    entry_points = file_paths - imported_files
+    if entry_points:
+        lines.append(f"\n--- Entry Points / Standalone Files ({len(entry_points)}) ---")
+        for ep in sorted(entry_points)[:10]:
+            lines.append(f"  {ep}")
+
+    # ── Classes and their methods ───────────────────────────────────────
+    class_nodes = [(n, d) for n, d in G.nodes(data=True) if d.get("type") in ("class", "struct")]
+    if class_nodes:
+        lines.append(f"\n--- Classes ({len(class_nodes)}) ---")
+        for cls_node, cls_data in class_nodes[:10]:
+            methods = [v.split("::")[-1] for _, v, ed in G.edges(cls_data.get("file", ""), data=True)
+                       if ed.get("relation") == "defines" and "::" in v]
+            cls_name = cls_node.split("::")[-1] if "::" in cls_node else cls_node
+            lines.append(f"  {cls_name} ({cls_data.get('file', '?')})")
 
     return "\n".join(lines)
