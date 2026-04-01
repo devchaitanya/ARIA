@@ -1,5 +1,6 @@
 import json
 import time
+import random
 import logging
 import httpx
 from abc import ABC, abstractmethod
@@ -17,8 +18,14 @@ logger = logging.getLogger(__name__)
 # Initialize Gemini client once
 _gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-MAX_RETRIES = 5
-BASE_DELAY = 4  # seconds
+# Per-model retries (keep low so fallback kicks in fast)
+MODEL_RETRIES = 2
+MODEL_BASE_DELAY = 3  # seconds
+
+
+class RateLimitError(Exception):
+    """Raised on 429 / quota errors to trigger fast provider fallback."""
+    pass
 
 
 @dataclass
@@ -34,18 +41,22 @@ class Finding:
     confidence: float = 1.0
 
 
-def _retry_with_backoff(func, max_retries=MAX_RETRIES, base_delay=BASE_DELAY):
-    """Retry a function with exponential backoff on rate limit or server errors."""
+def _retry_with_backoff(func, max_retries=MODEL_RETRIES, base_delay=MODEL_BASE_DELAY):
+    """Retry with exponential backoff. Raises RateLimitError on 429 so caller can fallback fast."""
     for attempt in range(max_retries):
         try:
             return func()
         except Exception as e:
             err_str = str(e).lower()
-            is_retryable = "429" in err_str or "rate" in err_str or "quota" in err_str or "500" in err_str or "503" in err_str
-            if is_retryable and attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt)
-                logger.warning(f"Rate limited (attempt {attempt+1}/{max_retries}), waiting {delay}s...")
+            is_rate_limit = "429" in err_str or "rate" in err_str or "quota" in err_str
+            is_server_err = "500" in err_str or "503" in err_str
+            if (is_rate_limit or is_server_err) and attempt < max_retries - 1:
+                jitter = random.uniform(0, 1)
+                delay = base_delay * (2 ** attempt) + jitter
+                logger.warning(f"Retryable error (attempt {attempt+1}/{max_retries}), waiting {delay:.1f}s...")
                 time.sleep(delay)
+            elif is_rate_limit:
+                raise RateLimitError(str(e)) from e
             else:
                 raise
 
@@ -166,6 +177,10 @@ class BaseAgent(ABC):
                     return self._call_gemini(system_prompt, user_prompt)
                 elif provider == "mistral" and MISTRAL_API_KEY:
                     return self._call_mistral(system_prompt, user_prompt)
+            except RateLimitError as e:
+                last_error = e
+                logger.warning(f"  {self.name}: {provider} rate-limited, skipping to next provider...")
+                continue
             except Exception as e:
                 last_error = e
                 logger.warning(f"  {self.name}: {provider} failed ({e.__class__.__name__}), trying fallback...")
@@ -195,6 +210,9 @@ class BaseAgent(ABC):
                 return resp.json()["choices"][0]["message"]["content"]
             try:
                 return _retry_with_backoff(_do)
+            except RateLimitError:
+                # 429 is per-key, not per-model — skip alt model too
+                raise
             except Exception as e:
                 last_err = e
                 logger.warning(f"  {self.name}: groq model {model} failed, trying alt model...")
@@ -217,6 +235,8 @@ class BaseAgent(ABC):
                 return response.text
             try:
                 return _retry_with_backoff(_do)
+            except RateLimitError:
+                raise
             except Exception as e:
                 last_err = e
                 logger.warning(f"  {self.name}: gemini model {model} failed, trying alt model...")
@@ -245,6 +265,8 @@ class BaseAgent(ABC):
                 return resp.json()["choices"][0]["message"]["content"]
             try:
                 return _retry_with_backoff(_do)
+            except RateLimitError:
+                raise
             except Exception as e:
                 last_err = e
                 logger.warning(f"  {self.name}: mistral model {model} failed, trying alt model...")
