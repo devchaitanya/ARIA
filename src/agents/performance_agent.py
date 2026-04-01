@@ -3,7 +3,8 @@ from src.agents.base_agent import BaseAgent
 
 class PerformanceAgent(BaseAgent):
     def __init__(self):
-        super().__init__(name="Performance Profiler", provider="mistral", model="mistral-small")
+        from src.config import MISTRAL_MODEL
+        super().__init__(name="Performance Profiler", provider="mistral", model=MISTRAL_MODEL)
 
     def get_system_prompt(self) -> str:
         return (

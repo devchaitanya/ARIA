@@ -3,7 +3,8 @@ from src.agents.base_agent import BaseAgent
 
 class SlopDetectorAgent(BaseAgent):
     def __init__(self):
-        super().__init__(name="AI-Slop Detector", provider="mistral", model="mistral-small")
+        from src.config import MISTRAL_MODEL_ALT
+        super().__init__(name="AI-Slop Detector", provider="mistral", model=MISTRAL_MODEL_ALT)
 
     def get_system_prompt(self) -> str:
         return (

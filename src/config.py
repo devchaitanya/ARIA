@@ -24,5 +24,8 @@ CONFIDENCE_THRESHOLD = 0.7
 SIMILARITY_THRESHOLD = 0.85
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
-GEMINI_MODEL = "gemini-2.0-flash"
+GROQ_MODEL_ALT = "meta-llama/llama-4-scout-17b-16e-instruct"
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL_ALT = "gemini-2.0-flash"
 MISTRAL_MODEL = "mistral-small-latest"
+MISTRAL_MODEL_ALT = "devstral-small-2507"

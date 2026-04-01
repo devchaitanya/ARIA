@@ -5,7 +5,12 @@ import httpx
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from google import genai
-from src.config import GROQ_API_KEY, GEMINI_API_KEY, MISTRAL_API_KEY, GROQ_MODEL, GEMINI_MODEL, MISTRAL_MODEL
+from src.config import (
+    GROQ_API_KEY, GEMINI_API_KEY, MISTRAL_API_KEY,
+    GROQ_MODEL, GROQ_MODEL_ALT,
+    GEMINI_MODEL, GEMINI_MODEL_ALT,
+    MISTRAL_MODEL, MISTRAL_MODEL_ALT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -168,55 +173,79 @@ class BaseAgent(ABC):
         raise last_error or ValueError(f"No available provider for {self.name}")
 
     def _call_groq(self, system_prompt: str, user_prompt: str) -> str:
-        def _do():
-            resp = httpx.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": GROQ_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 4096,
-                },
-                timeout=120,
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
-        return _retry_with_backoff(_do)
+        models_to_try = [self.model, GROQ_MODEL_ALT] if self.model == GROQ_MODEL else [self.model, GROQ_MODEL]
+        last_err = None
+        for model in models_to_try:
+            def _do(m=model):
+                resp = httpx.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": m,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": 0.3,
+                        "max_tokens": 4096,
+                    },
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                return resp.json()["choices"][0]["message"]["content"]
+            try:
+                return _retry_with_backoff(_do)
+            except Exception as e:
+                last_err = e
+                logger.warning(f"  {self.name}: groq model {model} failed, trying alt model...")
+        raise last_err
 
     def _call_gemini(self, system_prompt: str, user_prompt: str) -> str:
-        def _do():
-            response = _gemini_client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=user_prompt,
-                config=genai.types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=0.3,
-                    max_output_tokens=4096,
-                ),
-            )
-            return response.text
-        return _retry_with_backoff(_do)
+        models_to_try = [self.model, GEMINI_MODEL_ALT] if self.model == GEMINI_MODEL else [self.model, GEMINI_MODEL]
+        last_err = None
+        for model in models_to_try:
+            def _do(m=model):
+                response = _gemini_client.models.generate_content(
+                    model=m,
+                    contents=user_prompt,
+                    config=genai.types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        temperature=0.3,
+                        max_output_tokens=4096,
+                    ),
+                )
+                return response.text
+            try:
+                return _retry_with_backoff(_do)
+            except Exception as e:
+                last_err = e
+                logger.warning(f"  {self.name}: gemini model {model} failed, trying alt model...")
+        raise last_err
 
     def _call_mistral(self, system_prompt: str, user_prompt: str) -> str:
-        def _do():
-            resp = httpx.post(
-                "https://api.mistral.ai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": MISTRAL_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 4096,
-                },
-                timeout=120,
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
-        return _retry_with_backoff(_do)
+        models_to_try = [self.model, MISTRAL_MODEL_ALT] if self.model == MISTRAL_MODEL else [self.model, MISTRAL_MODEL]
+        last_err = None
+        for model in models_to_try:
+            def _do(m=model):
+                resp = httpx.post(
+                    "https://api.mistral.ai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {MISTRAL_API_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": m,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": 0.3,
+                        "max_tokens": 4096,
+                    },
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                return resp.json()["choices"][0]["message"]["content"]
+            try:
+                return _retry_with_backoff(_do)
+            except Exception as e:
+                last_err = e
+                logger.warning(f"  {self.name}: mistral model {model} failed, trying alt model...")
+        raise last_err

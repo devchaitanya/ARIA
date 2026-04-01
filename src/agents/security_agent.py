@@ -3,7 +3,8 @@ from src.agents.base_agent import BaseAgent
 
 class SecurityAgent(BaseAgent):
     def __init__(self):
-        super().__init__(name="Security Auditor", provider="groq", model="llama-3.3-70b")
+        from src.config import GROQ_MODEL
+        super().__init__(name="Security Auditor", provider="groq", model=GROQ_MODEL)
 
     def get_system_prompt(self) -> str:
         return (

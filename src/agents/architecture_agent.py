@@ -3,7 +3,8 @@ from src.agents.base_agent import BaseAgent
 
 class ArchitectureAgent(BaseAgent):
     def __init__(self):
-        super().__init__(name="Architecture Reviewer", provider="gemini", model="gemini-2.0-flash")
+        from src.config import GEMINI_MODEL
+        super().__init__(name="Architecture Reviewer", provider="gemini", model=GEMINI_MODEL)
 
     def get_system_prompt(self) -> str:
         return (
