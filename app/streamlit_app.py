@@ -321,7 +321,9 @@ def _render_graph(G):
         '<span>— <span style="color:#4b5563">defines</span></span></div>',
         unsafe_allow_html=True,
     )
-    st.html(html, height=440)
+    # Wrap in a fixed-height div so the iframe fills it
+    wrapped = f'<div style="height:440px;width:100%;overflow:hidden;">{html}</div>'
+    st.html(wrapped)
     st.caption(f"{min(show, node_count)}/{node_count} nodes · {G.number_of_edges()} edges · drag & zoom to explore")
 
 
