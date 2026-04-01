@@ -46,23 +46,16 @@ def main():
 def run_review(repo_url: str, branch: str):
     progress = st.progress(0)
     status_text = st.empty()
+    detail_text = st.empty()
 
-    stages = [
-        ("🔍 Cloning repository and parsing AST...", 15),
-        ("🧠 Running specialized agent swarm (5 agents across 3 LLM families)...", 40),
-        ("⚔️ Model Debate — cross-verifying findings...", 70),
-        ("✅ Validating results...", 85),
-        ("📋 Generating report...", 95),
-    ]
-
-    for msg, pct in stages[:1]:
-        status_text.markdown(f"**{msg}**")
-        progress.progress(pct / 100)
+    def on_progress(stage, message, pct):
+        progress.progress(min(pct, 1.0))
+        status_text.markdown(f"**{message}**")
 
     start_time = time.time()
 
     try:
-        state = run_pipeline(repo_url, branch)
+        state = run_pipeline(repo_url, branch, on_progress=on_progress)
     except Exception as e:
         st.error(f"Pipeline failed: {str(e)}")
         return
@@ -70,6 +63,7 @@ def run_review(repo_url: str, branch: str):
     elapsed = time.time() - start_time
     progress.progress(1.0)
     status_text.markdown(f"**✅ Review complete in {elapsed:.1f}s**")
+    detail_text.empty()
 
     if state.status == "failed":
         st.error(f"Review failed: {state.error}")

@@ -27,8 +27,10 @@ def create_agents():
     ]
 
 
-def node_ingest(state: ReviewState) -> ReviewState:
+def node_ingest(state: ReviewState, on_progress=None) -> ReviewState:
     """Stage 1: Clone repo, parse AST, build knowledge graph."""
+    if on_progress:
+        on_progress("cloning", "🔍 Cloning repository...", 0.05)
     logger.info(f"[INGEST] Cloning {state.repo_url}")
     state.status = "ingesting"
 
@@ -36,9 +38,15 @@ def node_ingest(state: ReviewState) -> ReviewState:
         meta = clone_repo(state.repo_url, state.branch)
         state.repo_path = meta.local_path
 
+        if on_progress:
+            on_progress("parsing", "📂 Parsing source files...", 0.10)
+
         files = collect_files(meta.local_path, SUPPORTED_EXTENSIONS, MAX_FILE_SIZE, MAX_FILES)
         state.files = files
         logger.info(f"[INGEST] Collected {len(files)} files")
+
+        if on_progress:
+            on_progress("graph", f"🔗 Building knowledge graph ({len(files)} files)...", 0.13)
 
         kg = build_knowledge_graph(files)
         state.graph_summary = get_graph_summary(kg)
@@ -46,6 +54,8 @@ def node_ingest(state: ReviewState) -> ReviewState:
 
         build_context_chunks(files)
 
+        if on_progress:
+            on_progress("ingested", f"✅ Ingested {len(files)} files, {kg['stats']['total_nodes']} nodes", 0.15)
         logger.info(f"[INGEST] Knowledge graph: {kg['stats']}")
     except Exception as e:
         state.error = f"Ingestion failed: {str(e)}"
@@ -55,8 +65,8 @@ def node_ingest(state: ReviewState) -> ReviewState:
     return state
 
 
-def node_review(state: ReviewState) -> ReviewState:
-    """Stage 2: Run parallel specialized agent swarm."""
+def node_review(state: ReviewState, on_progress=None) -> ReviewState:
+    """Stage 2: Run specialized agent swarm sequentially."""
     if state.status == "failed":
         return state
 
@@ -65,6 +75,7 @@ def node_review(state: ReviewState) -> ReviewState:
 
     agents = create_agents()
     all_findings = []
+    total_agents = len(agents)
 
     def run_agent(agent):
         try:
@@ -78,22 +89,32 @@ def node_review(state: ReviewState) -> ReviewState:
 
     # Run agents sequentially with delay to respect rate limits across providers
     import time
-    for agent in agents:
+    for i, agent in enumerate(agents):
+        if on_progress:
+            pct = 0.18 + (i / total_agents) * 0.37
+            on_progress("agent", f"🧠 Agent {i+1}/{total_agents}: {agent.name} ({agent.provider}/{agent.model.split('/')[-1]})...", pct)
         name, findings = run_agent(agent)
         state.agent_findings[name] = findings
         all_findings.extend(findings)
+        if on_progress:
+            pct = 0.18 + ((i + 1) / total_agents) * 0.37
+            on_progress("agent_done", f"  ✓ {name}: {len(findings)} findings", pct)
         time.sleep(2)  # Rate-limit spacing between agents
 
     state.all_findings = all_findings
+    if on_progress:
+        on_progress("review_done", f"🧠 All agents complete: {len(all_findings)} total findings", 0.55)
     logger.info(f"[REVIEW] Total findings across all agents: {len(all_findings)}")
     return state
 
 
-def node_debate(state: ReviewState) -> ReviewState:
+def node_debate(state: ReviewState, on_progress=None) -> ReviewState:
     """Stage 3: Cross-verify findings via Model Debate Protocol."""
     if state.status == "failed":
         return state
 
+    if on_progress:
+        on_progress("debate", f"⚔️ Model Debate — cross-verifying {len(state.all_findings)} findings...", 0.58)
     logger.info("[DEBATE] Starting cross-verification")
     state.status = "debating"
 
@@ -101,8 +122,10 @@ def node_debate(state: ReviewState) -> ReviewState:
     debate_mgr = DebateManager(agents, state.files)
 
     try:
-        verified = debate_mgr.run_debate(state.all_findings)
+        verified = debate_mgr.run_debate(state.all_findings, on_progress=on_progress)
         state.verified_findings = verified
+        if on_progress:
+            on_progress("debate_done", f"⚔️ Debate complete: {len(verified)}/{len(state.all_findings)} findings verified", 0.82)
         logger.info(f"[DEBATE] Verified findings: {len(verified)} / {len(state.all_findings)}")
     except Exception as e:
         logger.error(f"[DEBATE] Failed: {e}")
@@ -113,11 +136,13 @@ def node_debate(state: ReviewState) -> ReviewState:
     return state
 
 
-def node_validate(state: ReviewState) -> ReviewState:
+def node_validate(state: ReviewState, on_progress=None) -> ReviewState:
     """Stage 4: Validate results, check for obvious hallucinations."""
     if state.status == "failed":
         return state
 
+    if on_progress:
+        on_progress("validate", "✅ Validating findings...", 0.85)
     logger.info("[VALIDATE] Checking findings quality")
 
     valid_findings = []
@@ -141,11 +166,13 @@ def node_validate(state: ReviewState) -> ReviewState:
     return state
 
 
-def node_report(state: ReviewState) -> ReviewState:
+def node_report(state: ReviewState, on_progress=None) -> ReviewState:
     """Stage 5: Generate the final structured report."""
     if state.status == "failed":
         return state
 
+    if on_progress:
+        on_progress("report", "📋 Generating report...", 0.90)
     logger.info("[REPORT] Generating report")
     state.status = "generating"
 
@@ -164,22 +191,22 @@ def node_report(state: ReviewState) -> ReviewState:
     return state
 
 
-def run_pipeline(repo_url: str, branch: str = "main") -> ReviewState:
+def run_pipeline(repo_url: str, branch: str = "main", on_progress=None) -> ReviewState:
     """Execute the full ARIA pipeline as a sequential state machine."""
     state = ReviewState(repo_url=repo_url, branch=branch)
 
-    state = node_ingest(state)
+    state = node_ingest(state, on_progress)
     if state.status == "failed":
         return state
 
     for attempt in range(state.max_retries + 1):
-        state = node_review(state)
-        state = node_debate(state)
-        state = node_validate(state)
+        state = node_review(state, on_progress)
+        state = node_debate(state, on_progress)
+        state = node_validate(state, on_progress)
 
         if state.status != "reviewing":
             break
         logger.info(f"[PIPELINE] Retry {attempt + 1}")
 
-    state = node_report(state)
+    state = node_report(state, on_progress)
     return state

@@ -19,13 +19,17 @@ class DebateManager:
         self.files = files
         self._file_content_map = {f["path"]: f["content"] for f in files}
 
-    def run_debate(self, all_findings: list[Finding]) -> list[Finding]:
+    def run_debate(self, all_findings: list[Finding], on_progress=None) -> list[Finding]:
         """Cross-verify findings across different model families."""
         logger.info(f"Starting debate on {len(all_findings)} findings")
 
         verified_findings = []
+        total = len(all_findings)
 
-        for finding in all_findings:
+        for idx, finding in enumerate(all_findings):
+            if on_progress and total > 0:
+                pct = 0.58 + (idx / total) * 0.22
+                on_progress("debating", f"⚔️ Debating finding {idx+1}/{total}: {finding.title[:50]}...", pct)
             verifiers = self._get_cross_family_verifiers(finding.agent)
             if not verifiers:
                 finding.confidence = 0.5
