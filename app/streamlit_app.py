@@ -4,7 +4,9 @@ import time
 import json
 import logging
 import tempfile
+import base64
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -321,9 +323,7 @@ def _render_graph(G):
         '<span>— <span style="color:#4b5563">defines</span></span></div>',
         unsafe_allow_html=True,
     )
-    # Wrap in a fixed-height div so the iframe fills it
-    wrapped = f'<div style="height:440px;width:100%;overflow:hidden;">{html}</div>'
-    st.html(wrapped)
+    components.html(html, height=460, scrolling=False)
     st.caption(f"{min(show, node_count)}/{node_count} nodes · {G.number_of_edges()} edges · drag & zoom to explore")
 
 
